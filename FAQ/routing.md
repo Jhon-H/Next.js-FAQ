@@ -60,3 +60,146 @@ function Page() {
 ```
 
 ## Internacionalizacio rutas
+
+Next soporta internacionalizacion en las rutas
+
+Primero configure que **locales** va a soportar su app, y los dominios de cada una si los hay
+
+```ts
+// next.config.js
+module.exports = {
+  i18n: {
+    // These are all the locales you want to support in
+    // your application
+    locales: ['en-US', 'fr', 'nl-NL'],
+    // This is the default locale you want to be used when visiting
+    // a non-locale prefixed path e.g. `/hello`
+    defaultLocale: 'en-US',
+    // This is a list of locale domains and the default locale they
+    // should handle (these are only required when setting up domain routing)
+    // Note: subdomains must be included in the domain value to be matched e.g. "fr.example.com".
+    domains: [
+      {
+        domain: 'example.com',
+        defaultLocale: 'en-US',
+      },
+      {
+        domain: 'example.nl',
+        defaultLocale: 'nl-NL',
+      },
+      {
+        domain: 'example.fr',
+        defaultLocale: 'fr',
+        // an optional http field can also be used to test
+        // locale domains locally with http instead of https
+        http: true,
+      },
+    ],
+  },
+}
+```
+
+Hay 2 estrategias de **locale**
+
+- usar subpath: `/blog`, `fr/blog`, `en-US/blog`
+- usar subdominio: `myapp.com`, `myapp.fr`
+
+Para acceder al **locale** actual mire ``locale`` de ``useRouter``
+
+Nota: por defecto next trata de detectar el **locale** basandose en el header ``Accept-Language`` y en el dominio.
+
+Para moverse entre **locales**
+
+`<Link href="/another" locale="fr">`
+
+`router.push('/another', '/another', { locale: 'fr' })`
+
+## Rutas públicas y privadas (estrategias)
+
+- Si la página es generada de forma estática, use middlewares para verificar si está autenticado/logueado
+
+```ts
+export async function middleware(request: NextRequest, event: NextFetchEvent) {
+  if (request.nextUrl.pathname.startsWith('/checkout')) {
+    await checkoutMiddleware(request, event)
+  }
+}
+
+async function checkoutMiddleware(req: NextRequest, ev: NextFetchEvent) {
+
+  const token = req.cookies.get('token')?.value || ''
+
+  try {
+    await jwt.isValidToken(token)
+    return NextResponse.next()
+
+  } catch(error) {
+    const { protocol, host, pathname } = req.nextUrl;
+
+    return NextResponse.redirect(`${protocol}//${host}/auth/login?p=${pathname}`)
+  }
+}
+```
+
+- Si la página es generada con SSR, use el mismo SSR para vertificar si está atutenticado/logueado
+
+```ts
+export const getServerSideProps: GetServerSideProps = async ({ req, query }) => {
+  const session = await getSession({ req })
+
+  const { p = '/' } = query
+
+  if (session) {
+    return {
+      redirect: {
+        destination: p.toString(),
+        permanent: false
+      }
+    }
+  }
+
+  return {
+    props: { }
+  }
+}
+```
+
+- De la forma tradicional de react, cree un componente WithPrivateRoute que sea un HOC y que revisa como chidlren los que va a renderizar
+
+```ts
+const WithPrivateRoute = ({ children }) => {
+  const router = useRouter();
+
+  useEffect(() => {
+    onAuthStateChanged((user) => {
+      if (!user) {
+        router.push('/login?p=currentPage');
+      }
+    });
+  }, []);
+
+  // Tener cuidado porque se renderiza el children la primera vez
+  // ej: usar useState para saber si ya se verificó la autenticación
+
+  return <>{children}</>;
+};
+```
+
+```ts
+export default function ProfilePage () => {}
+ProfilePage.Auth = WithPrivateRoute
+```
+
+```ts
+const PublicRoute = ({ children }) => <>{children}</>;
+
+function MyApp({ Component, pageProps }) {
+  const Auth = Component.Auth || PublicRoute;
+
+  return (
+    <Auth>
+      <Component {...pageProps} />
+    </Auth>
+  );
+}
+```
